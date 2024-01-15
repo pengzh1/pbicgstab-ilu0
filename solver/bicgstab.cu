@@ -66,51 +66,44 @@ __global__
 void spTrSolveL(const int *__restrict__ d_csrRowPtr,
                 const int *__restrict__ d_csrColIdx,
                 const double *__restrict__ d_csrVal,
-                volatile int *d_get_value,// 0*m
+                volatile bool *__restrict__ d_get_value,// 0*m
                 const int m, // rows
-                const int nnz, // nnz for L
                 const double *__restrict__ d_b, // rhs
                 double *d_x, // initVec
-                const int begin,// 0
                 int *d_id_extractor // 0
 ) {
-    const int global_id = atomicAdd(d_id_extractor, 1);
-    if (global_id >= m || d_get_value[global_id] == 1) {
+//    const int global_id = atomicAdd(d_id_extractor, 1);
+    const int global_id = threadIdx.x + blockIdx.x * blockDim.x;
+    if (global_id >= m) {
         return;
     }
     int col, j, i;
-    col = -1;
     double xi;
     double left_sum = 0;
     i = global_id; // 3
     j = d_csrRowPtr[i];
-    int itr = 0;
-    // 整行无元素，直接求解
-    if (d_csrRowPtr[i + 1] == d_csrRowPtr[i]) {
-        xi = (d_b[i] - left_sum);
-        d_x[i] = xi;
-        __threadfence();
-        d_get_value[i] = 1;
-        printf("beginx %d %d %f\n", global_id, i, d_x[i]);
+    if (d_csrColIdx[j] > i) {
+        return;
     }
-//    __syncthreads();
-    itr = 0;
-//    __threadfence();
-    while (j < d_csrRowPtr[i + 1] && d_csrColIdx[j] <= i) { // 1,2
-        itr += 1;
+    int end = d_csrRowPtr[i + 1] - 1;
+    while (d_csrColIdx[end] > i) {
+        end -= 1;
+    }
+    end += 1;
+    while (j < end) { // 1,2
         col = d_csrColIdx[j];
-        while (d_get_value[col] == 1 && j < d_csrRowPtr[i + 1] && d_csrColIdx[j] < i) {
+        while (d_get_value[col] && j < end) {
             left_sum += d_csrVal[j] * d_x[col];
             j++;
-            if (j < d_csrRowPtr[i + 1] && d_csrColIdx[j] < i) {
+            if (j < end) {
                 col = d_csrColIdx[j];
             }
         }
-        if (i == col || j == d_csrRowPtr[i + 1]) {
+        if (i == col || j == end) {
             xi = (d_b[i] - left_sum);
             d_x[i] = xi;
             __threadfence();
-            d_get_value[i] = 1;
+            d_get_value[i] = true;
             j++;
         }
     }
@@ -120,18 +113,16 @@ __global__
 void spTrSolveU(const int *__restrict__ d_csrRowPtr,
                 const int *__restrict__ d_csrColIdx,
                 const double *__restrict__ d_csrVal,
-                volatile int *d_get_value,// 0*m
+                volatile bool *__restrict__ d_get_value,// 0*m
                 const int m, // rows
-                const int nnz, // nnz for L
                 const double *__restrict__ d_b, // rhs
                 double *d_x, // initVec
-                const int begin,// 0
                 int *d_id_extractor // 0
 ) {
-    int global_idx = atomicAdd(d_id_extractor, 1);
+//    int global_idx = atomicAdd(d_id_extractor, 1);
+    int global_idx = threadIdx.x + blockIdx.x * blockDim.x;
     const int global_id = m - global_idx - 1;
-    int adj = 0;
-    if (global_id < 0 || d_get_value[global_id] == 1) {
+    if (global_id < 0) {
         return;
     }
     int col, j, i;
@@ -139,37 +130,33 @@ void spTrSolveU(const int *__restrict__ d_csrRowPtr,
     double xi;
     double right_sum = 0;
     i = global_id; // 3
-
     j = d_csrRowPtr[i + 1] - 1;
+    if(d_csrColIdx[j] < i) {
+        return;
+    }
+    int end = d_csrRowPtr[i];
+    while (d_csrColIdx[end] < i) {
+        end += 1;
+    }
     int itr = 0;
-    __syncthreads();
-    __threadfence();
-    while (j >= d_csrRowPtr[i] && d_csrColIdx[j] - adj >= i) { // 1,2
+    while (j >= end && d_csrColIdx[j] >= i) { // 1,2
         itr += 1;
         col = d_csrColIdx[j];
-        if (itr % 100000 == 0 && global_id < 200000) {
-            printf("add2 nPtr%d glid%d j%d col%d sum%f geted%d geted%d wait%d \n ", d_csrRowPtr[i + 1], global_id, j,
-                   col,
-                   right_sum, d_get_value[i], d_get_value[col - adj], col - adj);
-        }
-        while (j >= d_csrRowPtr[i] && d_csrColIdx[j] - adj > i && d_get_value[col - adj] == 1) {
-            right_sum += d_csrVal[j] * d_x[col - adj];
+        while (j >= end && d_csrColIdx[j] > i && d_get_value[col]) {
+            right_sum += d_csrVal[j] * d_x[col];
             j--;
-            if (j >= d_csrRowPtr[i] && d_csrColIdx[j] - adj > i) {
+            if (j >= end && d_csrColIdx[j] > i) {
                 col = d_csrColIdx[j];
             }
         }
-        if (i == col - adj || j == d_csrRowPtr[i]) {
+        if (i == col || j == end) {
             xi = (d_b[i] - right_sum) / (d_csrVal[j]);
             d_x[i] = xi;
             __threadfence();
-            d_get_value[i] = 1;
-            __threadfence();
+            d_get_value[i] = true;
             j--;
         }
-        __threadfence();
     }
-    __threadfence();
 }
 
 
@@ -183,29 +170,25 @@ int spTrSolve(const int *__restrict__ d_csrRowPtr,
               bool isL
 ) {
 
-
-    int *d_get_value;
     //get_value
-    int *get_value = (int *) malloc(m * sizeof(int));
-    memset(get_value, 0, m * sizeof(int));
-    cudaMalloc((void **) &d_get_value, (m) * sizeof(int));
-    cudaMemcpy(d_get_value, get_value, (m) * sizeof(int), cudaMemcpyHostToDevice);
+    bool *d_get_value;
+    cudaMalloc((void **) &d_get_value, (m) * sizeof(bool));
+    cudaMemset(d_get_value, false, sizeof(bool) * m);
     // step 5: solve L*y = x
     int num_threads = WARP_PER_BLOCK * WARP_SIZE;;
     int num_blocks = ceil((double) m / (double) (num_threads));
     int *d_id_extractor;
     cudaMalloc((void **) &d_id_extractor, sizeof(int));
-    cudaMemset(d_get_value, 0, sizeof(int) * m);
     cudaMemset(d_x, 0, sizeof(double) * m);
     cudaMemset(d_id_extractor, 0, sizeof(int));
     if (isL) {
         spTrSolveL<<< num_blocks, num_threads >>>
                 (d_csrRowPtr, d_csrColIdx, d_csrVal,
-                 d_get_value, m, nnz, d_b, d_x, 0, d_id_extractor);
+                 d_get_value, m, d_b, d_x, d_id_extractor);
     } else {
         spTrSolveU<<< num_blocks, num_threads >>>
                 (d_csrRowPtr, d_csrColIdx, d_csrVal,
-                 d_get_value, m, nnz, d_b, d_x, 0, d_id_extractor);
+                 d_get_value, m, d_b, d_x, d_id_extractor);
     }
     cudaCheckError2();
     cudaDeviceSynchronize();
@@ -215,10 +198,9 @@ int spTrSolve(const int *__restrict__ d_csrRowPtr,
 
 }
 
-/// Set up descriptor for LU.
-void setUpDescriptorLU(cusparseMatDescr_t &descrLU, cusparseMatrixType_t matrixType,
-                       cusparseIndexBase_t indexBase, cusparseFillMode_t fillMode,
-                       cusparseDiagType_t diagType) {
+void setDesc(cusparseMatDescr_t &descrLU, cusparseMatrixType_t matrixType,
+             cusparseIndexBase_t indexBase, cusparseFillMode_t fillMode,
+             cusparseDiagType_t diagType) {
     cusparseCreateMatDescr(&descrLU);
     cusparseSetMatType(descrLU, matrixType);
     cusparseSetMatIndexBase(descrLU, indexBase);
@@ -237,12 +219,11 @@ void checkSpError(cusparseStatus_t error) {
     }
 }
 
-/// Memory query for LU.
-void memoryQueryLU(csrilu02Info_t &infoA, csrsv2Info_t &infoL, csrsv2Info_t &infoU,
-                   cusparseHandle_t cusparseHandle, const int n, const int nnz,
-                   cusparseMatDescr_t &descrA, cusparseMatDescr_t &descrL, cusparseMatDescr_t &descrU,
-                   double *d_A, const int *d_A_RowPtr, const int *d_A_ColInd,
-                   cusparseOperation_t matrixOperation, void **pBuffer) {
+void memQuery(csrilu02Info_t &infoA, csrsv2Info_t &infoL, csrsv2Info_t &infoU,
+              cusparseHandle_t cusparseHandle, const int n, const int nnz,
+              cusparseMatDescr_t &descrA, cusparseMatDescr_t &descrL, cusparseMatDescr_t &descrU,
+              double *d_A, const int *d_A_RowPtr, const int *d_A_ColInd,
+              cusparseOperation_t matrixOperation, void **pBuffer) {
     cusparseCreateCsrilu02Info(&infoA);
     cusparseCreateCsrsv2Info(&infoL);
     cusparseCreateCsrsv2Info(&infoU);
@@ -260,8 +241,8 @@ void memoryQueryLU(csrilu02Info_t &infoA, csrsv2Info_t &infoL, csrsv2Info_t &inf
     checkCudaError(cudaMalloc((void **) pBuffer, pBufferSize));
 }
 
-/// Analysis for LU.
-void analyzeLU(csrilu02Info_t &infoA, csrsv2Info_t &infoL,
+
+void spAnalyze(csrilu02Info_t &infoA, csrsv2Info_t &infoL,
                csrsv2Info_t &infoU, cusparseHandle_t cusparseHandle, const int N,
                const int nnz, cusparseMatDescr_t descrA, cusparseMatDescr_t &descrL,
                cusparseMatDescr_t &descrU, double *d_A, const int *d_A_RowPtr,
@@ -298,21 +279,18 @@ void setUpMatrix(cusparseHandle_t &cusparseHandle, cusparseMatDescr_t &descrA,
                  csrsv2Info_t &infoL, csrsv2Info_t &infoU, int n, int nnz, double *valACopy,
                  const int *rowPtr, const int *colInd, void **pBuffer) {
     setUpDescriptor(descrA, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO);
-    setUpDescriptorLU(descrL, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO,
-                      CUSPARSE_FILL_MODE_LOWER, CUSPARSE_DIAG_TYPE_UNIT);
-    setUpDescriptorLU(descrU, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO,
-                      CUSPARSE_FILL_MODE_UPPER, CUSPARSE_DIAG_TYPE_NON_UNIT);
+    setDesc(descrL, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO,
+            CUSPARSE_FILL_MODE_LOWER, CUSPARSE_DIAG_TYPE_UNIT);
+    setDesc(descrU, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO,
+            CUSPARSE_FILL_MODE_UPPER, CUSPARSE_DIAG_TYPE_NON_UNIT);
 
     // Step 2: Query how much memory used in LU factorization and the two following system inversions.
-    memoryQueryLU(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
-                  valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE, pBuffer);
+    memQuery(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
+             valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE, pBuffer);
 //     Step 3: Analyze the three problems: LU factorization and the two following system inversions.
-    analyzeLU(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
-              valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE,
-              CUSPARSE_SOLVE_POLICY_NO_LEVEL, CUSPARSE_SOLVE_POLICY_NO_LEVEL, *pBuffer);
-//     Step 4: Factorize A = L * U (A will be overwritten).
-//    computeLU(infoA, cusparseHandle, n, nnz, descrA, valACopy, rowPtr, colInd,
-//              CUSPARSE_SOLVE_POLICY_NO_LEVEL, *pBuffer);
+//    spAnalyze(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
+//              valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE,
+//              CUSPARSE_SOLVE_POLICY_NO_LEVEL, CUSPARSE_SOLVE_POLICY_NO_LEVEL, *pBuffer);
     cudaCheckError2();
 }
 
@@ -370,7 +348,6 @@ void spNewMV(cusparseHandle_t handle,
 }
 
 void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, const int *colInd,
-                      int *rowMap, int *colSortMap,
                       const double *b, double *x, double tol, cusparseHandle_t cusparseHandle,
                       cublasHandle_t cublasHandle) {
     time_t solve_start = clock();
@@ -394,12 +371,8 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
                 &pBuffer);
     int *diag_info = nullptr;
     cudaMalloc((void **) &diag_info, sizeof(int) * n);
-    const int grid_size = ceil((double) n / (double) 32);
-//    find_locn_of_diag_elements(n, diag_info, rowPtr,
-//                               colInd);
     cudaCheckError2();
-
-    ILU0_MEGA(rowPtr, colInd, valACopy, rowMap, colSortMap,
+    ILU0_MEGA(rowPtr, colInd, valACopy,
               n,
               nnz);
     cudaDeviceSynchronize();
@@ -429,7 +402,7 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
     int niter = 0;
 
     // Initial guess x0 (all zeros here).
-    cublasDscal_v2(cublasHandle, n, &zero, x, 1);
+//    cublasDscal_v2(cublasHandle, n, &zero, x, 1);
     // 1: compute the initial residual r = b - A * x0.
     spNewMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, n, nnz, &nega_one, descrA, valA, rowPtr,
             colInd, x, &zero, r);
@@ -440,23 +413,17 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
     cublasDcopy_v2(cublasHandle, n, r, 1, rw, 1);
     cublasDcopy_v2(cublasHandle, n, r, 1, p, 1);
     time_t solve_start4 = clock();
-
     cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr0);
-
-
+    printf("initNRMR %f \n", nrmr0);
     // Repeat until convergence.
-
     while (true) {
         printf("niter %d ms %ld\n", niter, clock() / (CLOCKS_PER_SEC / 1000));
         time_t it0 = clock();
         rhop = rho;
         cublasDdot_v2(cublasHandle, n, rw, 1, r, 1, &rho);
-
         if (niter > 0) {
-            // 12
             beta = (rho / rhop) * (alpha / omega);
-
-            // 13, p = r + beta * (p - omega * v)
+            //  p = r + beta * (p - omega * v)
             cublasDaxpy_v2(cublasHandle, n, &nega_omega, q, 1, p, 1);  // p += -omega * v
             cublasDscal_v2(cublasHandle, n, &beta, p, 1);  // p *= beta
             cublasDaxpy_v2(cublasHandle, n, &one, r, 1, p, 1);  // p += 1 * r
@@ -465,8 +432,6 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         time_t it1 = clock();
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, p, t, true);
         cudaDeviceSynchronize();
-
-
         time_t it2 = clock();
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, t, ph, false);
         spNewMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, n, nnz, &one, descrA, valA, rowPtr, colInd,
@@ -481,8 +446,8 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr);
         cudaDeviceSynchronize();
         time_t it4 = clock();
-        if (nrmr / nrmr0 < tol) {
-            std::cout << std::setprecision(12) << nrmr / nrmr0 << " NRMR \n";
+        if ((nrmr / nrmr0) < tol) {
+            std::cout << std::setprecision(12) << nrmr / nrmr0 << " " << nrmr << " NRMR \n";
             break;
         }
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, r, t, true);
@@ -495,7 +460,6 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         cudaDeviceSynchronize();
         time_t it6 = clock();
         cublasDdot_v2(cublasHandle, n, t, 1, t, 1, &temp2);
-
         omega = temp1 / temp2;
         nega_omega = -omega;
         cublasDaxpy_v2(cublasHandle, n, &omega, s, 1, x, 1);
@@ -510,31 +474,15 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
                (it3 - it2) / (CLOCKS_PER_SEC / 1000),
                (it2 - it1) / (CLOCKS_PER_SEC / 1000),
                (it1 - it0) / (CLOCKS_PER_SEC / 1000));
-        if (nrmr / nrmr0 < tol) {
-            std::cout << std::setprecision(12) << nrmr / nrmr0 << " NRMR \n";
+        if ((nrmr / nrmr0) < tol) {
+            std::cout << std::setprecision(12) << nrmr / nrmr0 << nrmr << " NRMR \n";
             break;
         }
         niter++;
     }
     time_t solve_start5 = clock();
-//    cusparseDestroyMatDescr(descrA);
-//    cusparseDestroyMatDescr(descrL);
-//    cusparseDestroyMatDescr(descrU);
-//    cusparseDestroyCsrilu02Info(infoA);
-//    cusparseDestroyCsrsv2Info(infoL);
-//    cusparseDestroyCsrsv2Info(infoU);
-//    cudaFree(r);
-//    cudaFree(rw);
-//    cudaFree(p);
-//    cudaFree(ph);
-//    cudaFree(t);
-//    cudaFree(q);
-//    cudaFree(s);
-//    cudaFree(valACopy);
-//    cudaFree(pBuffer);;
     time_t solve_start6 = clock();
     time_t solve_end = clock();
-
     printf("solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n",
            (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000),
            (solve_end - solve_start6) / (CLOCKS_PER_SEC / 1000),

@@ -28,31 +28,29 @@ int main(int argc, char *argv[]) {
     char *resultfile = argv[6];
     std::ifstream in1;
     gettm(getTimeStamp());
-    std::cout <<"-----1.开始读取文件\n";
+    std::cout << "-----1.开始读取文件\n";
     in1.open(matrixfile);
     int k;
     int colt;
     double val;
-    int *rowPtr = new int[nrow + 1]();
-    int *colInd = new int[nnnz];
-    int *rowMap = new int[nnnz];
-    int *colSortMap = new int[nnnz];
-    double *csrData = new double[nnnz];
-    double *b = new double[nrow];
-    double *x = new double[nrow];
+    int *rowPtr, *colInd;
+    double *csrData, *b, *x;
+    cudaMallocHost((void **) &rowPtr, (nrow + 1) * sizeof(int));
+    cudaMallocHost((void **) &colInd, (nnnz) * sizeof(int));
+    cudaMallocHost((void **) &csrData, (nnnz) * sizeof(double));
+    cudaMallocHost((void **) &b, (nrow) * sizeof(double));
+    cudaMallocHost((void **) &x, (nrow) * sizeof(double));
     time_t run_start1 = clock();
+    int maxRow = 0;
     for (int i = 0; i < nnnz; i++) {
         in1 >> k;
         in1 >> colt;
         rowPtr[k]++;
+        if (rowPtr[k] > maxRow) {
+            maxRow = rowPtr[k];
+        }
         colInd[i] = colt - 1;
         in1 >> std::scientific >> csrData[i];
-        rowMap[i] = k - 1;
-        if (i == 0 || k - 1 != rowMap[i - 1]) {
-            colSortMap[i] = 0;
-        } else {
-            colSortMap[i] = colSortMap[i - 1] + 1;
-        }
     }
     in1.close();
     in1.open(rhsfile);
@@ -92,9 +90,20 @@ int main(int argc, char *argv[]) {
     int n = nrow;
     int nnz = nnnz;
     time_t solve_start = clock();
-    solve(rowPtr, colInd, csrData, rowMap, colSortMap, b, x, n, nnz, tol, cusparseHandle, cublasHandle);
+//    for (int i = 0; i < n; ++i) {
+//        x[i] = 0;
+//    }
+    gettm(getTimeStamp());
+    std::cout << "-----2.数据读取完成，开始求解 \n" << maxRow;
+    solve(rowPtr, colInd, csrData, b, x, n, nnz, tol, cusparseHandle, cublasHandle);
     time_t solve_end = clock();
+    gettm(getTimeStamp());
+    std::cout << "-----3.求解完成 耗时 " << (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000) << " ms\n";
     for (int i = 0; i < 5; ++i) {
+        std::cout << std::setprecision(12) << x[i] << " ";
+    }
+    std::cout << "......";
+    for (int i = n - 5; i < n; ++i) {
         std::cout << std::setprecision(12) << x[i] << " ";
     }
     std::cout << std::endl;

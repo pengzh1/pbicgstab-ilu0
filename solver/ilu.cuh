@@ -5,7 +5,7 @@
 
 void ILU0_MEGA(const int *d_csrRowPtr,
                const int *d_csrColIdx,
-               double *d_csrVal, int *rowMap, int *colSortMap,
+               double *d_csrVal,
                const int m, // rows
                           const int nnnz);
 
