@@ -39,6 +39,7 @@ void checkCudaError(cudaError_t e) {
         throw "xxx";
     }
 }
+
 void setUpDescriptor(cusparseMatDescr_t &descrA, cusparseMatrixType_t matrixType, cusparseIndexBase_t indexBase) {
     cusparseCreateMatDescr(&descrA);
     cusparseSetMatType(descrA, matrixType);
@@ -52,6 +53,7 @@ __global__ void printArrF(const double *val) {
     }
     printf("\n");
 }
+
 __global__ void printArrI(const int *val) {
     printf("dataI is ");
     for (int i = 0; i < 20; i++) {
@@ -284,7 +286,7 @@ void analyzeLU(csrilu02Info_t &infoA, csrsv2Info_t &infoL,
     cusparseDcsrsv2_analysis(cusparseHandle, matrixOperation, N, nnz, descrU,
                              d_A, d_A_RowPtr, d_A_ColInd, infoU, solvePolicy2, pBuffer);
     cudaDeviceSynchronize();
-    printf("luCost%ld", (clock() - t1) / (CLOCKS_PER_SEC / 1000));
+//    printf("luCost%ld", (clock() - t1) / (CLOCKS_PER_SEC / 1000));
 }
 
 __global__ void printStrF() {
@@ -361,10 +363,10 @@ void spNewMV(cusparseHandle_t handle,
     cudaDeviceSynchronize();
     cudaCheckError2();
     time_t mv4 = clock();
-    printf("mvTime %ld %ld %ld %ld \n",
-           (mv4 - mv3) / (CLOCKS_PER_SEC / 1000), (mv3 - mv2) / (CLOCKS_PER_SEC / 1000),
-           (mv2 - mv1) / (CLOCKS_PER_SEC / 1000),
-           (mv1 - mv0) / (CLOCKS_PER_SEC / 1000));
+//    printf("mvTime %ld %ld %ld %ld \n",
+//           (mv4 - mv3) / (CLOCKS_PER_SEC / 1000), (mv3 - mv2) / (CLOCKS_PER_SEC / 1000),
+//           (mv2 - mv1) / (CLOCKS_PER_SEC / 1000),
+//           (mv1 - mv0) / (CLOCKS_PER_SEC / 1000));
 }
 
 void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, const int *colInd,
@@ -461,77 +463,21 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         }
         cudaDeviceSynchronize();
         time_t it1 = clock();
-//
-//        int *myRow = new int[n + 1];
-//        int *myCol = new int[nnz];
-//        double *myVal = new double[nnz];
-//        cudaMemcpy(myRow, rowPtr, (n + 1) * sizeof(int), cudaMemcpyDeviceToHost);
-//        cudaMemcpy(myCol, colInd, (nnz) * sizeof(int), cudaMemcpyDeviceToHost);
-//        cudaMemcpy(myVal, valACopy, (nnz) * sizeof(double), cudaMemcpyDeviceToHost);
-
-//        double *myRhs = new double[n];
-//        double *mySolve = new double[n];
-//        cudaMemcpy(myRhs, p, (n) * sizeof(double), cudaMemcpyDeviceToHost);
-
-        // 15: solve M * pw = p for pw.
-//        cusparseDcsrsv2_solve(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, nnz, &one, descrL, valACopy, rowPtr,
-//                              colInd, infoL, p, t, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, p, t, true);
         cudaDeviceSynchronize();
 
 
         time_t it2 = clock();
-//        double *myRhs = new double[n];
-//        double *mySolve = new double[n];
-//        cudaMemcpy(myRhs, t, (n) * sizeof(double), cudaMemcpyDeviceToHost);
-
-
-//        cusparseDcsrsv2_solve(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, nnz, &one, descrU, valACopy, rowPtr,
-//                              colInd, infoU, t, ph, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, t, ph, false);
-//        cudaMemcpy(mySolve, ph, (n) * sizeof(double), cudaMemcpyDeviceToHost);
-//        std::ofstream out3;
-//        out3.open("/home/featurize/data/mock2.mtx");
-//        for (int i = 0; i <= n; i++) {
-//            out3 << myRow[i] << " ";
-//        }
-//        out3 << "\n";
-//        for (int i = 0; i < nnz; i++) {
-//            out3 << myCol[i] << " ";
-//        }
-//        out3 << "\n";
-//        for (int i = 0; i < nnz; i++) {
-//            out3 << std::setprecision(8) << myVal[i];
-//            out3 << " ";
-//        }
-//        out3 << "\n";
-//        for (int i = 0; i < n; i++) {
-//            out3 << myRhs[i];
-//            out3 << " ";
-//        }
-//        out3 << "\n";
-//        for (int i = 0; i < n; i++) {
-//            out3 << mySolve[i];
-//            out3 << " ";
-//        }
-//        out3.flush();
-//        throw 3;
-        // 16
         spNewMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, n, nnz, &one, descrA, valA, rowPtr, colInd,
                 ph, &zero, q);
         cudaDeviceSynchronize();
         time_t it3 = clock();
-        // 17
         cublasDdot_v2(cublasHandle, n, rw, 1, q, 1, &temp1);
         alpha = rho / temp1;
         negalpha = -alpha;
-
-        // 18
         cublasDaxpy_v2(cublasHandle, n, &negalpha, q, 1, r, 1);
-
-        // 19
         cublasDaxpy_v2(cublasHandle, n, &alpha, ph, 1, x, 1);
-        // 20
         cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr);
         cudaDeviceSynchronize();
         time_t it4 = clock();
@@ -539,24 +485,12 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
             std::cout << std::setprecision(12) << nrmr / nrmr0 << " NRMR \n";
             break;
         }
-
-        // 23: solve M * sh = r for sh, note that s is sh for now.
-//        cusparseDcsrsv2_solve(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, nnz, &one, descrL, valACopy, rowPtr,
-//                              colInd, infoL, r, t, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, r, t, true);
         cudaDeviceSynchronize();
         time_t it5 = clock();
-//        cusparseDcsrsv2_solve(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, nnz, &one, descrU, valACopy, rowPtr,
-//                              colInd, infoU, t, s, CUSPARSE_SOLVE_POLICY_NO_LEVEL, pBuffer);
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, t, s, false);
-
-
-        // 24
         spNewMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, n, nnz, &one, descrA, valA, rowPtr, colInd,
                 s, &zero, t);
-
-
-        // 25: omega = np.dot(t, r) / np.dot(t, t).
         cublasDdot_v2(cublasHandle, n, t, 1, r, 1, &temp1);
         cudaDeviceSynchronize();
         time_t it6 = clock();
@@ -564,13 +498,8 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
 
         omega = temp1 / temp2;
         nega_omega = -omega;
-
-        // 26
-
         cublasDaxpy_v2(cublasHandle, n, &omega, s, 1, x, 1);
-
         cublasDaxpy_v2(cublasHandle, n, &nega_omega, t, 1, r, 1);
-
         cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr);
         cudaDeviceSynchronize();
         time_t it7 = clock();
@@ -585,35 +514,29 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
             std::cout << std::setprecision(12) << nrmr / nrmr0 << " NRMR \n";
             break;
         }
-
         niter++;
-
-        //printf("Norm: %f\n", nrmr);
     }
     time_t solve_start5 = clock();
-
-    //printf("Number of iterations: %d\n", niter);
-
-    // Clean up
-    cusparseDestroyMatDescr(descrA);
-    cusparseDestroyMatDescr(descrL);
-    cusparseDestroyMatDescr(descrU);
-    cusparseDestroyCsrilu02Info(infoA);
-    cusparseDestroyCsrsv2Info(infoL);
-    cusparseDestroyCsrsv2Info(infoU);
-    cudaFree(r);
-    cudaFree(rw);
-    cudaFree(p);
-    cudaFree(ph);
-    cudaFree(t);
-    cudaFree(q);
-    cudaFree(s);
-    cudaFree(valACopy);
-    cudaFree(pBuffer);;
+//    cusparseDestroyMatDescr(descrA);
+//    cusparseDestroyMatDescr(descrL);
+//    cusparseDestroyMatDescr(descrU);
+//    cusparseDestroyCsrilu02Info(infoA);
+//    cusparseDestroyCsrsv2Info(infoL);
+//    cusparseDestroyCsrsv2Info(infoU);
+//    cudaFree(r);
+//    cudaFree(rw);
+//    cudaFree(p);
+//    cudaFree(ph);
+//    cudaFree(t);
+//    cudaFree(q);
+//    cudaFree(s);
+//    cudaFree(valACopy);
+//    cudaFree(pBuffer);;
     time_t solve_start6 = clock();
     time_t solve_end = clock();
 
-    printf("solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n", (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000),
+    printf("solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n",
+           (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000),
            (solve_end - solve_start6) / (CLOCKS_PER_SEC / 1000),
            (solve_start6 - solve_start5) / (CLOCKS_PER_SEC / 1000),
            (solve_start5 - solve_start4) / (CLOCKS_PER_SEC / 1000),
@@ -622,7 +545,3 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
            (solve_start2 - solve_start1) / (CLOCKS_PER_SEC / 1000),
            (solve_start1 - solve_start) / (CLOCKS_PER_SEC / 1000));
 }
-
-
-
-

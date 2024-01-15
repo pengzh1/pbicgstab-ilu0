@@ -1,7 +1,3 @@
-//
-// Created by 周鹏 on 2024/1/15.
-//
-
 #ifndef AMG_ILU_CUH
 #define AMG_ILU_CUH
 

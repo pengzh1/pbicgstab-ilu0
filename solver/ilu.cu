@@ -282,19 +282,17 @@ int analyseMatrixByGPU(int *d_dep,
                                                 m,
                                                 nnnz,
                                                 d_id_extractor);
-    cudaCheckError3();
+//    cudaCheckError3();
     time_t g3 = clock();
 
     sumList<<<1, 1024>>>(nnnz + 1, d_ptrs);
-    cudaCheckError3();
     int lastIndex = 0;
     time_t g4 = clock();
-    cudaCheckError3();
     time_t g5 = clock();
 
     printf("gTime %ld %ld %ld %ld \n", (g2 - g1) / (CLOCKS_PER_SEC / 1000), (g3 - g2) / (CLOCKS_PER_SEC / 1000),
            (g4 - g3) / (CLOCKS_PER_SEC / 1000), (g5 - g4) / (CLOCKS_PER_SEC / 1000));
-    cudaCheckError3();
+//    cudaCheckError3();
     return lastIndex;
 }
 
@@ -304,7 +302,7 @@ void ILU0_MEGA(const int *d_csrRowPtr,
                double *d_csrVal,
                int *rowMap, int *colSortMap,
                const int m, // rows
-                          const int nnnz) {
+               const int nnnz) {
     int *nz_ptrs;
     int *dependencies;
 //    int *depcp;

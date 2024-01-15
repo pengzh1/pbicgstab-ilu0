@@ -24,13 +24,13 @@ include_directories(${CUDA_INCLUDE_DIRS})
 
 #add_subdirectory(src)
 
-cuda_add_executable(bicgstab main.cpp bicgstab.cu bicgstab.cuh
-        spsv.h
-        ilu.cu
-        ilu.cuh)
-target_link_libraries(bicgstab ${CUDA_cusparse_LIBRARY} )
-target_link_libraries(bicgstab ${CUDA_cublas_LIBRARY} )
-target_link_libraries(bicgstab ${CUDA_LIBRARIES})
+cuda_add_executable(megasolve main.cpp solver/bicgstab.cu solver/bicgstab.cuh
+        solver/ilu.cu
+        solver/ilu.cuh
+        solve.hpp)
+target_link_libraries(megasolve ${CUDA_cusparse_LIBRARY} )
+target_link_libraries(megasolve ${CUDA_cublas_LIBRARY} )
+target_link_libraries(megasolve ${CUDA_LIBRARIES})
 
 #target_include_directories(main
 #    PRIVATE
