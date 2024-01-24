@@ -11,8 +11,9 @@ project(AMG LANGUAGES CXX CUDA)
 ## Set CMAKE CXX_BASIC_FLAGS
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_FLAGS "-std=c++11")
+set(CUDA_NVCC_FLAGS -Xcompiler;-fPIC;-lcublas;-lcusparse;-shared;-std=c++11)
 #set(CMAKE_CXX_EXTENSIONS OFF)
-#set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 #list(APPEND CXX_BASIC_FLAGS "-g" "-O3" "-fopenmp" "-Wno-cpp")
 
@@ -25,7 +26,7 @@ cuda_add_executable(megasolve main.cpp solver/bicgstab.cu solver/bicgstab.cuh
         solver/ilu.cu
         solver/ilu.cuh
         solve.hpp)
+set_property(TARGET megasolve PROPERTY CUDA_STANDARD 11)
 target_link_libraries(megasolve ${CUDA_cusparse_LIBRARY} )
 target_link_libraries(megasolve ${CUDA_cublas_LIBRARY} )
 target_link_libraries(megasolve ${CUDA_LIBRARIES})
-set(CUDA_NVCC_FLAGS -Xcompiler;-fPIC;-lcublas;-lcusparse;-shared)
