@@ -8,9 +8,9 @@
 
 #endif //AMG_BICGSTAB_CUH
 
-void spSolverBiCGStab(int n, int nnz,const  double *valA, const int *rowPtr, const int *colInd,
+void spSolverBiCGStab(int mpid,int n, int nnz,const  double *valA, const int *rowPtr, const int *colInd,
                       const double *b, double *x, double tol, cusparseHandle_t cusparseHandle,
-                      cublasHandle_t cublasHandle);
+                      cublasHandle_t cublasHandle,const int dep_size,const int dep_sub_size,const int max_iter);
 
 int spTrSolve(const int *__restrict__ d_csrRowPtr,
               const int *__restrict__ d_csrColIdx,

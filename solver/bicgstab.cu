@@ -14,12 +14,14 @@
 #include "ilu.cuh"
 
 #ifndef WARP_SIZE
-#define WARP_SIZE   32
+#define WARP_SIZE    32
 #endif
 
 #ifndef WARP_PER_BLOCK
 #define WARP_PER_BLOCK  32
 #endif
+
+bool ldebug = true;
 
 void cudaCheckError2() {
     cudaDeviceSynchronize();
@@ -44,22 +46,6 @@ void setUpDescriptor(cusparseMatDescr_t &descrA, cusparseMatrixType_t matrixType
     cusparseCreateMatDescr(&descrA);
     cusparseSetMatType(descrA, matrixType);
     cusparseSetMatIndexBase(descrA, indexBase);
-}
-
-__global__ void printArrF(const double *val) {
-    printf("data is ");
-    for (int i = 0; i < 20; i++) {
-        printf("%f ", val[i]);
-    }
-    printf("\n");
-}
-
-__global__ void printArrI(const int *val) {
-    printf("dataI is ");
-    for (int i = 0; i < 20; i++) {
-        printf("%d ", val[i]);
-    }
-    printf("\n");
 }
 
 __global__
@@ -131,7 +117,7 @@ void spTrSolveU(const int *__restrict__ d_csrRowPtr,
     double right_sum = 0;
     i = global_id; // 3
     j = d_csrRowPtr[i + 1] - 1;
-    if(d_csrColIdx[j] < i) {
+    if (d_csrColIdx[j] < i) {
         return;
     }
     int end = d_csrRowPtr[i];
@@ -241,39 +227,6 @@ void memQuery(csrilu02Info_t &infoA, csrsv2Info_t &infoL, csrsv2Info_t &infoU,
     checkCudaError(cudaMalloc((void **) pBuffer, pBufferSize));
 }
 
-
-void spAnalyze(csrilu02Info_t &infoA, csrsv2Info_t &infoL,
-               csrsv2Info_t &infoU, cusparseHandle_t cusparseHandle, const int N,
-               const int nnz, cusparseMatDescr_t descrA, cusparseMatDescr_t &descrL,
-               cusparseMatDescr_t &descrU, double *d_A, const int *d_A_RowPtr,
-               const int *d_A_ColInd, cusparseOperation_t matrixOperation,
-               cusparseSolvePolicy_t solvePolicy1, cusparseSolvePolicy_t solvePolicy2,
-               void *pBuffer) {
-    int structural_zero;
-    time_t t1 = clock();
-
-
-    checkSpError(cusparseDcsrilu02_analysis(cusparseHandle, N, nnz, descrA, d_A, d_A_RowPtr,
-                                            d_A_ColInd, infoA, solvePolicy1, pBuffer));
-
-    cusparseStatus_t status = cusparseXcsrilu02_zeroPivot(cusparseHandle, infoA, &structural_zero);
-
-    if (CUSPARSE_STATUS_ZERO_PIVOT == status) {
-        printf("A(%d, %d) is missing\n", structural_zero, structural_zero);
-    }
-
-    cusparseDcsrsv2_analysis(cusparseHandle, matrixOperation, N, nnz, descrL,
-                             d_A, d_A_RowPtr, d_A_ColInd, infoL, solvePolicy1, pBuffer);
-    cusparseDcsrsv2_analysis(cusparseHandle, matrixOperation, N, nnz, descrU,
-                             d_A, d_A_RowPtr, d_A_ColInd, infoU, solvePolicy2, pBuffer);
-    cudaDeviceSynchronize();
-//    printf("luCost%ld", (clock() - t1) / (CLOCKS_PER_SEC / 1000));
-}
-
-__global__ void printStrF() {
-
-}
-
 void setUpMatrix(cusparseHandle_t &cusparseHandle, cusparseMatDescr_t &descrA,
                  cusparseMatDescr_t &descrL, cusparseMatDescr_t &descrU, csrilu02Info_t &infoA,
                  csrsv2Info_t &infoL, csrsv2Info_t &infoU, int n, int nnz, double *valACopy,
@@ -283,7 +236,6 @@ void setUpMatrix(cusparseHandle_t &cusparseHandle, cusparseMatDescr_t &descrA,
             CUSPARSE_FILL_MODE_LOWER, CUSPARSE_DIAG_TYPE_UNIT);
     setDesc(descrU, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO,
             CUSPARSE_FILL_MODE_UPPER, CUSPARSE_DIAG_TYPE_NON_UNIT);
-
     // Step 2: Query how much memory used in LU factorization and the two following system inversions.
     memQuery(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
              valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE, pBuffer);
@@ -328,6 +280,7 @@ void spNewMV(cusparseHandle_t handle,
     cudaCheckError2();
     void *dBuffer = NULL;
     cudaMalloc(&dBuffer, bufferSize);
+    cudaCheckError2();
     cudaDeviceSynchronize();
     time_t mv2 = clock();
     checkSpError(cusparseSpMV(handle, transA, alpha, matA_descr, vecX_descr, beta, vecY_descr, CUDA_R_64F,
@@ -341,29 +294,22 @@ void spNewMV(cusparseHandle_t handle,
     cudaDeviceSynchronize();
     cudaCheckError2();
     time_t mv4 = clock();
-//    printf("mvTime %ld %ld %ld %ld \n",
-//           (mv4 - mv3) / (CLOCKS_PER_SEC / 1000), (mv3 - mv2) / (CLOCKS_PER_SEC / 1000),
-//           (mv2 - mv1) / (CLOCKS_PER_SEC / 1000),
-//           (mv1 - mv0) / (CLOCKS_PER_SEC / 1000));
 }
 
-void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, const int *colInd,
+void spSolverBiCGStab(int mpid, int n, int nnz, const double *valA, const int *rowPtr, const int *colInd,
                       const double *b, double *x, double tol, cusparseHandle_t cusparseHandle,
-                      cublasHandle_t cublasHandle) {
+                      cublasHandle_t cublasHandle, const int dep_size, const int dep_sub_size,const int max_iter) {
     time_t solve_start = clock();
-    // Create descriptors for A, L and U.
+    // 创建操作符  A, L  U.
     cusparseMatDescr_t descrA, descrL, descrU;
-
     // Create ILU and SV info for A, L and U.
     csrilu02Info_t infoA;
     csrsv2Info_t infoL, infoU;
-
     // Create a copy of A for incomplete LU decomposition.
     // This copy will be modified in the solving process.
     double *valACopy;
     cudaMalloc((void **) &valACopy, nnz * sizeof(double));
     cudaMemcpy(valACopy, valA, nnz * sizeof(double), cudaMemcpyDeviceToDevice);
-
     // Incomplete LU.
     time_t solve_start1 = clock();
     void *pBuffer;
@@ -371,10 +317,10 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
                 &pBuffer);
     int *diag_info = nullptr;
     cudaMalloc((void **) &diag_info, sizeof(int) * n);
-    cudaCheckError2();
+//    cudaCheckError2();
     ILU0_MEGA(rowPtr, colInd, valACopy,
               n,
-              nnz);
+              nnz, dep_size, dep_sub_size);
     cudaDeviceSynchronize();
     time_t solve_start2 = clock();
     double *r;
@@ -400,24 +346,28 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
     double nrmr0;
     double nrmr;
     int niter = 0;
-
     // Initial guess x0 (all zeros here).
 //    cublasDscal_v2(cublasHandle, n, &zero, x, 1);
     // 1: compute the initial residual r = b - A * x0.
     spNewMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, n, nnz, &nega_one, descrA, valA, rowPtr,
             colInd, x, &zero, r);
-    cudaCheckError2();
-
+//    cudaCheckError2();
     cublasDaxpy_v2(cublasHandle, n, &one, b, 1, r, 1);
     // 2: copy r into rw and p.
     cublasDcopy_v2(cublasHandle, n, r, 1, rw, 1);
     cublasDcopy_v2(cublasHandle, n, r, 1, p, 1);
     time_t solve_start4 = clock();
-    cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr0);
-    printf("initNRMR %f \n", nrmr0);
+    cublasDnrm2_v2(cublasHandle, n, b, 1, &nrmr0);
+    cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr);
+    if (ldebug) {
+        printf("initNRMR %.7f %.7f %.7f \n", nrmr0, nrmr, nrmr / nrmr0);
+    }
     // Repeat until convergence.
-    while (true) {
-        printf("niter %d ms %ld\n", niter, clock() / (CLOCKS_PER_SEC / 1000));
+    while (niter < max_iter) {
+        if (ldebug) {
+            printf("niter %d,nrmr: %.7f %.7f %.7f \n", niter, nrmr0, nrmr,
+                   nrmr / nrmr0);
+        }
         time_t it0 = clock();
         rhop = rho;
         cublasDdot_v2(cublasHandle, n, rw, 1, r, 1, &rho);
@@ -430,10 +380,12 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         }
         cudaDeviceSynchronize();
         time_t it1 = clock();
+        // 进行两次三角矩阵求解
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, p, t, true);
         cudaDeviceSynchronize();
         time_t it2 = clock();
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, t, ph, false);
+        // 矩阵乘
         spNewMV(cusparseHandle, CUSPARSE_OPERATION_NON_TRANSPOSE, n, n, nnz, &one, descrA, valA, rowPtr, colInd,
                 ph, &zero, q);
         cudaDeviceSynchronize();
@@ -441,15 +393,18 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         cublasDdot_v2(cublasHandle, n, rw, 1, q, 1, &temp1);
         alpha = rho / temp1;
         negalpha = -alpha;
+        // 计算当前残差
         cublasDaxpy_v2(cublasHandle, n, &negalpha, q, 1, r, 1);
         cublasDaxpy_v2(cublasHandle, n, &alpha, ph, 1, x, 1);
         cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr);
         cudaDeviceSynchronize();
         time_t it4 = clock();
+        //  判断是否收敛
         if ((nrmr / nrmr0) < tol) {
             std::cout << std::setprecision(12) << nrmr / nrmr0 << " " << nrmr << " NRMR \n";
             break;
         }
+        // 进行两次三角矩阵求解
         spTrSolve(rowPtr, colInd, valACopy, n, nnz, r, t, true);
         cudaDeviceSynchronize();
         time_t it5 = clock();
@@ -462,30 +417,44 @@ void spSolverBiCGStab(int n, int nnz, const double *valA, const int *rowPtr, con
         cublasDdot_v2(cublasHandle, n, t, 1, t, 1, &temp2);
         omega = temp1 / temp2;
         nega_omega = -omega;
+        // 计算当前残差
         cublasDaxpy_v2(cublasHandle, n, &omega, s, 1, x, 1);
         cublasDaxpy_v2(cublasHandle, n, &nega_omega, t, 1, r, 1);
         cublasDnrm2_v2(cublasHandle, n, r, 1, &nrmr);
         cudaDeviceSynchronize();
         time_t it7 = clock();
-        printf("itTime %ld %ld %ld %ld %ld %ld %ld \n", (it7 - it6) / (CLOCKS_PER_SEC / 1000),
-               (it6 - it5) / (CLOCKS_PER_SEC / 1000),
-               (it5 - it4) / (CLOCKS_PER_SEC / 1000),
-               (it4 - it3) / (CLOCKS_PER_SEC / 1000),
-               (it3 - it2) / (CLOCKS_PER_SEC / 1000),
-               (it2 - it1) / (CLOCKS_PER_SEC / 1000),
-               (it1 - it0) / (CLOCKS_PER_SEC / 1000));
+        if (ldebug) {
+            printf("[%d] itTime %ld %ld %ld %ld %ld %ld %ld \n", mpid, (it7 - it6) / (CLOCKS_PER_SEC / 1000),
+                   (it6 - it5) / (CLOCKS_PER_SEC / 1000),
+                   (it5 - it4) / (CLOCKS_PER_SEC / 1000),
+                   (it4 - it3) / (CLOCKS_PER_SEC / 1000),
+                   (it3 - it2) / (CLOCKS_PER_SEC / 1000),
+                   (it2 - it1) / (CLOCKS_PER_SEC / 1000),
+                   (it1 - it0) / (CLOCKS_PER_SEC / 1000));
+        }
+        //  判断是否收敛
         if ((nrmr / nrmr0) < tol) {
-            std::cout << std::setprecision(12) << nrmr / nrmr0 << nrmr << " NRMR \n";
+            if (ldebug) {
+                std::cout << std::setprecision(12) << nrmr / nrmr0 << " " << nrmr << " NRMR \n";
+            }
             break;
         }
         niter++;
     }
+    if (ldebug) {
+        std::cout << std::setprecision(12) << nrmr / nrmr0 << " " << nrmr << " NRMR \n";
+    }
     time_t solve_start5 = clock();
     time_t solve_start6 = clock();
     time_t solve_end = clock();
-    printf("solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n",
-           (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000),
-           (solve_end - solve_start6) / (CLOCKS_PER_SEC / 1000),
+//    cudaFree(rw);
+//    cudaFree(p);
+//    cudaFree(ph);
+//    cudaFree(t);
+//    cudaFree(q);
+//    cudaFree(s);
+    printf("[%d] solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n", mpid,
+           (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000), (solve_end - solve_start6) / (CLOCKS_PER_SEC / 1000),
            (solve_start6 - solve_start5) / (CLOCKS_PER_SEC / 1000),
            (solve_start5 - solve_start4) / (CLOCKS_PER_SEC / 1000),
            (solve_start4 - solve_start3) / (CLOCKS_PER_SEC / 1000),

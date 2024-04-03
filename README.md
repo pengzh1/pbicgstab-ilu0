@@ -8,23 +8,17 @@
 
 ## 性能评估
 
-GPU  1块 A4000， 16 GB 显存
-CPU  6核 E5-2680 v4
-内存  32  GB
-![img_2.png](img_2.png)
+GPU  V100， 32 GB 显存 / CPU  8核 Xeon /内存  64  GB
+
+![image_2.png](image_2.png)
 
 ## 运行说明
 
 * mkdir build && cd build
 * cmake ../
 * make
-* ./megasolve [矩阵行数] [非零元数] [矩阵文件] [右端项文件] [输出结果文件]
+* mpirun -np 1 ./megasolve [场景名称 可选:kcs/dboat] [场景数据目录 如 /root/data/kcs] [变量序号 0-6 依次对应 u v w s e k p]\n
 
-## 作品申报书等材料
-
-[作品申报书](作品申报书.docx)
-
-[项目介绍PPT](项目介绍PPT.pptx)
 
 
 

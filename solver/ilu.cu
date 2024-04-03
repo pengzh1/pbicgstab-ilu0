@@ -21,9 +21,7 @@
 #endif
 
 
-#ifndef DEP_SIZE
-#define DEP_SIZE  256
-#endif
+bool ludebug = true;
 
 void cudaCheckError3() {
     cudaDeviceSynchronize();
@@ -58,14 +56,14 @@ __global__ void findDiag(const int nrows, int *const __restrict__ diag_ptrs,
 }
 
 __global__ void findILU0(const int nrows, const int nnz, volatile double *const values,
-                         const uint32_t *__restrict__  dependencies,
-                         volatile bool *const ready) {
+                         const uint32_t *__restrict__ dependencies,
+                         volatile bool *const ready, const int dep_size, const int dep_sub_size) {
     const int gid = threadIdx.x + blockIdx.x * blockDim.x;
     if (gid >= nnz) {
         return;
     }
-    const int start = gid * (DEP_SIZE / 8) + 1;
-    const int end = gid * (DEP_SIZE / 8) + dependencies[start - 1];
+    const int start = gid * (dep_size / dep_sub_size) + 1;
+    const int end = gid * (dep_size / dep_sub_size) + dependencies[start - 1];
     const bool has_diag_dependency = ((end + 1 - start) % 2 == 1 && start <= end);
     int diag_loc = -1;
     if (has_diag_dependency) {
@@ -122,11 +120,11 @@ __global__ void findILU0(const int nrows, const int nnz, volatile double *const 
 
 
 __global__
-void analyseMatrix( uint32_t *__restrict__ dependencies,
+void analyseMatrix(uint32_t *__restrict__ dependencies,
                    const int *__restrict__ diag_ptrs,
                    const int *__restrict__ h_csrRowPtr,
                    const int *__restrict__ h_csrColIdx,
-                   const int m) {
+                   const int m, const int dep_size, const int dep_sub_size) {
     const int global_id = threadIdx.x + blockIdx.x * blockDim.x;
     if (global_id >= m) {
         return;
@@ -135,7 +133,7 @@ void analyseMatrix( uint32_t *__restrict__ dependencies,
     const int row_start = h_csrRowPtr[row_index];
     const int row_end = h_csrRowPtr[row_index + 1];
     for (int loc = row_start; loc < row_end; loc++) {
-        uint32_t startIdx = loc * (DEP_SIZE / 8);
+        uint32_t startIdx = loc * (dep_size / dep_sub_size);
         uint32_t dep = 1;
         int num_dependencies = 0;
         const int col_index = h_csrColIdx[loc];
@@ -159,7 +157,7 @@ void analyseMatrix( uint32_t *__restrict__ dependencies,
                 }
             }
         }
-        if (row_index > col_index && diag_ptrs[col_index] > 0) {
+        if (row_index > col_index) {
             const int diag_loc = diag_ptrs[col_index];
             dependencies[startIdx + dep] = diag_loc;
             dep++;
@@ -174,12 +172,14 @@ int analyseMatrixByGPU(uint32_t *d_dep,
                        const int *d_csrRowPtr,
                        const int *d_csrColIdx,
                        const int m,
-                       const int nnnz) {
+                       const int nnnz, const int dep_size, const int dep_sub_size) {
     const int nrows = m;
     int cur = 2 * nnnz;
     int dep = 0;
     time_t g1 = clock();
     // Matrix L
+    // 分析矩阵元素LU分解依赖
+    // 1.取对角元素位次
     findDiag<<<ceil(m / 1024) + 1, 1024 >>>(nrows, d_diag_ptrs, d_csrRowPtr,
                                             d_csrColIdx);
     cudaDeviceSynchronize();
@@ -187,19 +187,20 @@ int analyseMatrixByGPU(uint32_t *d_dep,
     int *d_id_extractor;
     cudaMalloc((void **) &d_id_extractor, sizeof(int));
     cudaMemset(d_id_extractor, 0, sizeof(int));
-
+    // 2.取所有元素的依赖元素
     analyseMatrix<<<ceil(m / 1024) + 1, 1024>>>(d_dep, d_diag_ptrs, d_csrRowPtr, d_csrColIdx,
-                                                m);
+                                                m, dep_size, dep_sub_size);
 //    cudaCheckError3();
     time_t g3 = clock();
 
     int lastIndex = 0;
     time_t g4 = clock();
     time_t g5 = clock();
-
-    printf("gTime %ld %ld %ld %ld \n", (g2 - g1) / (CLOCKS_PER_SEC / 1000), (g3 - g2) / (CLOCKS_PER_SEC / 1000),
-           (g4 - g3) / (CLOCKS_PER_SEC / 1000), (g5 - g4) / (CLOCKS_PER_SEC / 1000));
-//    cudaCheckError3();
+    // 打印LU分解预分析耗时统计
+    if (ludebug) {
+        printf("gTime %ld %ld %ld %ld \n", (g2 - g1) / (CLOCKS_PER_SEC / 1000), (g3 - g2) / (CLOCKS_PER_SEC / 1000),
+               (g4 - g3) / (CLOCKS_PER_SEC / 1000), (g5 - g4) / (CLOCKS_PER_SEC / 1000));
+    }
     return lastIndex;
 }
 
@@ -208,18 +209,21 @@ void ILU0_MEGA(const int *d_csrRowPtr,
                const int *d_csrColIdx,
                double *d_csrVal,
                const int m, // rows
-               const int nnnz) {
+               const int nnnz, const int dep_size, const int dep_sub_size) {
     uint32_t *dependencies;
 //    int *depcp;
     int *diag_ptrs;
-    cudaMalloc((void **) &dependencies, (m + 1) * DEP_SIZE * sizeof(uint32_t));
-//    cudaMalloc((void **) &depcp, (m + 1) * DEP_SIZE * sizeof(int));
+    cudaMalloc((void **) &dependencies, (m + 1) * dep_size * sizeof(uint32_t));
+//    cudaMalloc((void **) &depcp, (m + 1) * dep_sub_size * sizeof(int));
     cudaMalloc((void **) &diag_ptrs, m * sizeof(int));
-    cudaMemset(dependencies, 0, (m + 1) * DEP_SIZE * sizeof(int));
+    cudaMemset(dependencies, 0, (m + 1) * dep_sub_size * sizeof(int));
     cudaMemset(diag_ptrs, 0, m * sizeof(int));
     time_t ilu1 = clock();
+    // 分析矩阵元素LU分解依赖
+    // 1.取对角元素位次
+    // 2.取所有元素的依赖元素
     analyseMatrixByGPU(dependencies, diag_ptrs, d_csrRowPtr, d_csrColIdx, m,
-                       nnnz);
+                       nnnz, dep_size, dep_sub_size);
     cudaDeviceSynchronize();
     time_t ilu2 = clock();
 
@@ -238,19 +242,22 @@ void ILU0_MEGA(const int *d_csrRowPtr,
     int *d_id_extractor;
     cudaMalloc((void **) &d_id_extractor, sizeof(int));
     cudaMemset(d_id_extractor, 0, sizeof(int));
+    // 根据各个元素的依赖关系
+    // 按照ILU-0算法进行计算LU分解后的矩阵
     findILU0<<< grid, block >>>(m, nnnz,
                                 d_csrVal,
-                                dependencies, ready);
+                                dependencies, ready, dep_size, dep_sub_size);
     cudaCheckError3();
     time_t ilu4 = clock();
-
-    cudaFree(dependencies);
-    cudaFree(ready);
+//    cudaFree(dependencies);
+//    cudaFree(ready);
     cudaCheckError3();
     cudaDeviceSynchronize();
     time_t ilu5 = clock();
-    printf("iluTime %ld %ld %ld %ld \n", (ilu2 - ilu1) / (CLOCKS_PER_SEC / 1000),
-           (ilu3 - ilu2) / (CLOCKS_PER_SEC / 1000), (ilu4 - ilu3) / (CLOCKS_PER_SEC / 1000),
-           (ilu5 - ilu4) / (CLOCKS_PER_SEC / 1000));
-
+    // 打印耗时统计
+    if (ludebug) {
+        printf("iluTime %ld %ld %ld %ld \n", (ilu2 - ilu1) / (CLOCKS_PER_SEC / 1000),
+               (ilu3 - ilu2) / (CLOCKS_PER_SEC / 1000), (ilu4 - ilu3) / (CLOCKS_PER_SEC / 1000),
+               (ilu5 - ilu4) / (CLOCKS_PER_SEC / 1000));
+    }
 }
