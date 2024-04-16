@@ -317,7 +317,7 @@ solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_fi
     printProgressBar(nrow + nnnz + nrow, nnnz + 2 * nrow, task_name);
     printf("\n");
     printTime();
-    printf("---[%s]数据读取完成 %d", task_name.c_str(), maxRow);
+    printf("---[%s]数据读取完成 \n", task_name.c_str());
     solveMeta *meta = new solveMeta;
     meta->mid = mid;
     meta->task_name = task_name;

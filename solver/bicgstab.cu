@@ -21,7 +21,7 @@
 #define WARP_PER_BLOCK  32
 #endif
 
-bool ldebug = true;
+bool ldebug = false;
 
 void cudaCheckError2() {
     cudaDeviceSynchronize();
@@ -237,8 +237,8 @@ void setUpMatrix(cusparseHandle_t &cusparseHandle, cusparseMatDescr_t &descrA,
     setDesc(descrU, CUSPARSE_MATRIX_TYPE_GENERAL, CUSPARSE_INDEX_BASE_ZERO,
             CUSPARSE_FILL_MODE_UPPER, CUSPARSE_DIAG_TYPE_NON_UNIT);
     // Step 2: Query how much memory used in LU factorization and the two following system inversions.
-    memQuery(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
-             valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE, pBuffer);
+//    memQuery(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
+//             valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE, pBuffer);
 //     Step 3: Analyze the three problems: LU factorization and the two following system inversions.
 //    spAnalyze(infoA, infoL, infoU, cusparseHandle, n, nnz, descrA, descrL, descrU,
 //              valACopy, rowPtr, colInd, CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -298,7 +298,7 @@ void spNewMV(cusparseHandle_t handle,
 
 void spSolverBiCGStab(int mpid, int n, int nnz, const double *valA, const int *rowPtr, const int *colInd,
                       const double *b, double *x, double tol, cusparseHandle_t cusparseHandle,
-                      cublasHandle_t cublasHandle, const int dep_size, const int dep_sub_size,const int max_iter) {
+                      cublasHandle_t cublasHandle, const int dep_size, const int dep_sub_size, const int max_iter) {
     time_t solve_start = clock();
     // 创建操作符  A, L  U.
     cusparseMatDescr_t descrA, descrL, descrU;
@@ -310,6 +310,7 @@ void spSolverBiCGStab(int mpid, int n, int nnz, const double *valA, const int *r
     double *valACopy;
     cudaMalloc((void **) &valACopy, nnz * sizeof(double));
     cudaMemcpy(valACopy, valA, nnz * sizeof(double), cudaMemcpyDeviceToDevice);
+    cudaDeviceSynchronize();
     // Incomplete LU.
     time_t solve_start1 = clock();
     void *pBuffer;
@@ -453,12 +454,16 @@ void spSolverBiCGStab(int mpid, int n, int nnz, const double *valA, const int *r
 //    cudaFree(t);
 //    cudaFree(q);
 //    cudaFree(s);
-    printf("[%d] solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n", mpid,
-           (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000), (solve_end - solve_start6) / (CLOCKS_PER_SEC / 1000),
-           (solve_start6 - solve_start5) / (CLOCKS_PER_SEC / 1000),
-           (solve_start5 - solve_start4) / (CLOCKS_PER_SEC / 1000),
-           (solve_start4 - solve_start3) / (CLOCKS_PER_SEC / 1000),
-           (solve_start3 - solve_start2) / (CLOCKS_PER_SEC / 1000),
-           (solve_start2 - solve_start1) / (CLOCKS_PER_SEC / 1000),
-           (solve_start1 - solve_start) / (CLOCKS_PER_SEC / 1000));
+    if (ldebug) {
+        printf("[%d] solveTime %ld %ld %ld %ld %ld %ld %ld %ld\n", mpid,
+               (solve_end - solve_start) / (CLOCKS_PER_SEC / 1000),
+               (solve_end - solve_start6) / (CLOCKS_PER_SEC / 1000),
+               (solve_start6 - solve_start5) / (CLOCKS_PER_SEC / 1000),
+               (solve_start5 - solve_start4) / (CLOCKS_PER_SEC / 1000),
+               (solve_start4 - solve_start3) / (CLOCKS_PER_SEC / 1000),
+               (solve_start3 - solve_start2) / (CLOCKS_PER_SEC / 1000),
+               (solve_start2 - solve_start1) / (CLOCKS_PER_SEC / 1000),
+               (solve_start1 - solve_start) / (CLOCKS_PER_SEC / 1000));
+    }
+    printf("[%d] 迭代计算结束,迭代次数: %d,绝对残差: %.8f,相对残差:%.8f\n ", mpid, niter + 1, nrmr, nrmr / nrmr0);
 }
