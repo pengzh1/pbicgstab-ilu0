@@ -17,7 +17,7 @@ GPU  V100， 32 GB 显存 / CPU  8核 Xeon /内存  64  GB
 * mkdir build && cd build
 * cmake ../
 * make
-* mpirun -np 1 ./megasolve [场景名称 可选:kcs/dboat] [场景数据目录 如 /root/data/kcs] [变量序号 0-6 依次对应 u v w s e k p]\n
+* ./megasolve [数据目录] [系数矩阵文件名] [右端项文件名] [初始值文件名] [网格数量] [非零元数] [输出结果文件名] [可选-最大迭代次数]
 
 
 
