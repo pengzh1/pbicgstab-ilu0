@@ -21,7 +21,7 @@
 #define WARP_PER_BLOCK  32
 #endif
 
-bool ldebug = false;
+bool ldebug = true;
 
 void cudaCheckError2() {
     cudaDeviceSynchronize();

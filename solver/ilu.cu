@@ -21,7 +21,7 @@
 #endif
 
 
-bool ludebug = false;
+bool ludebug = true;
 
 void cudaCheckError3() {
     cudaDeviceSynchronize();

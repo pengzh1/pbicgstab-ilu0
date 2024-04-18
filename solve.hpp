@@ -46,36 +46,36 @@ struct solveMeta {
     int dep_sub_size;
 };
 
-string kcs[7][7] = {
-        {
-                "589940", "4141924", "matrix_u_101.dat",
-                "vector_rhs_u_101.dat", "vector_init_u_101.dat", "result_u.dat", "动量分量-u"
-        },
-        {
-                "589940", "4141924", "matrix_v_101.dat",
-                "vector_rhs_v_101.dat", "vector_init_v_101.dat", "result_v.dat", "动量分量-v"
-        },
-        {
-                "589940", "4141924", "matrix_w_101.dat",
-                "vector_rhs_w_101.dat", "vector_init_w_101.dat", "result_w.dat", "动量分量-w"
-        },
-        {
-                "589940", "4141924", "matrix_s_101.dat",
-                "vector_rhs_s_101.dat", "vector_init_s_101.dat", "result_s.dat", "流体体积分数"
-        },
-        {
-                "589940", "4049160", "matrix_e_101.dat",
-                "vector_rhs_e_101.dat", "vector_init_e_101.dat", "result_e.dat", "湍流耗散率"
-        },
-        {
-                "589940", "4141924", "matrix_k_101.dat",
-                "vector_rhs_k_101.dat", "vector_init_k_101.dat", "result_k.dat", "湍动能"
-        },
-        {
-                "589940", "4141924", "matrix_p_101.dat",
-                "vector_rhs_p_101.dat", "vector_init_p_101.dat", "result_p.dat", "压力修正值"
-        }
-};
+//string kcs[7][7] = {
+//        {
+//                "589940", "4141924", "matrix_u_101.dat",
+//                "vector_rhs_u_101.dat", "vector_init_u_101.dat", "result_u.dat", "动量分量-u"
+//        },
+//        {
+//                "589940", "4141924", "matrix_v_101.dat",
+//                "vector_rhs_v_101.dat", "vector_init_v_101.dat", "result_v.dat", "动量分量-v"
+//        },
+//        {
+//                "589940", "4141924", "matrix_w_101.dat",
+//                "vector_rhs_w_101.dat", "vector_init_w_101.dat", "result_w.dat", "动量分量-w"
+//        },
+//        {
+//                "589940", "4141924", "matrix_s_101.dat",
+//                "vector_rhs_s_101.dat", "vector_init_s_101.dat", "result_s.dat", "流体体积分数"
+//        },
+//        {
+//                "589940", "4049160", "matrix_e_101.dat",
+//                "vector_rhs_e_101.dat", "vector_init_e_101.dat", "result_e.dat", "湍流耗散率"
+//        },
+//        {
+//                "589940", "4141924", "matrix_k_101.dat",
+//                "vector_rhs_k_101.dat", "vector_init_k_101.dat", "result_k.dat", "湍动能"
+//        },
+//        {
+//                "589940", "4141924", "matrix_p_101.dat",
+//                "vector_rhs_p_101.dat", "vector_init_p_101.dat", "result_p.dat", "压力修正值"
+//        }
+//};
 
 string dboat[7][7] = {
         {
@@ -196,12 +196,12 @@ void solve(int mpid, int *rowPtr, int *colInd, double *csrData,
     time_t solve_end = clock();
 }
 
-void printProgressBar(int progress, int total, string key) {
+void printProgressBar(int progress, int total) {
     int barWidth = 50;
     float percentage = (float) progress / total;
     int filledLength = barWidth * percentage;
     // 打印文件读取进度条
-    printf("\r%s[", key.c_str());
+    printf("\r[");
     for (int i = 0; i < barWidth; i++) {
         if (i < filledLength) {
             printf("#");
@@ -226,12 +226,12 @@ char *readAll(string filename) {
     return buffer;
 }
 
-solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_file, string init_file,
+solveMeta *read_new(string matrix_file, string rhs_file, string init_file,
                     string result_file, int nrow,
                     int nnnz, int dep_size, int dep_sub_size) {
 
     printTime();
-    printf("---[%s]开始读取数据 %d\n", task_name.c_str(), mid);
+    printf("---开始读取数据 \n");
     cusparseHandle_t cusparseHandle;
     cublasHandle_t cublasHandle;
     cusparseCreate(&cusparseHandle);
@@ -254,7 +254,7 @@ solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_fi
     int rnnz = 0;
     for (int j = 0; j < nnnz; ++j) {
         if (j % 100000 == 0) {
-            printProgressBar(j, nnnz + 2 * nrow, task_name);
+            printProgressBar(j, nnnz + 2 * nrow);
         }
         k = strtol(linestr, &end, 10);
         linestr = end + 1;
@@ -280,7 +280,7 @@ solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_fi
     linestr = buffer + 9;
     for (int j = 0; j < nrow; j++) {
         if (j % 100000 == 0) {
-            printProgressBar(j + nnnz, nnnz + 2 * nrow, task_name);
+            printProgressBar(j + nnnz, nnnz + 2 * nrow);
         }
         c = strtod(linestr, &end);
         linestr = end + 1;
@@ -294,7 +294,7 @@ solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_fi
     if (new_data) {
         for (int j = 0; j < nrow; j++) {
             if (j % 100000 == 0) {
-                printProgressBar(j + nnnz + nrow, nnnz + 2 * nrow, task_name);
+                printProgressBar(j + nnnz + nrow, nnnz + 2 * nrow);
             }
             linestr = strchr(linestr, ' ') + 1;
             linestr = strchr(linestr, ' ') + 1;
@@ -305,7 +305,7 @@ solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_fi
     } else {
         for (int j = 0; j < nrow; j++) {
             if (j % 100000 == 0) {
-                printProgressBar(j + nnnz + nrow, nnnz + 2 * nrow, task_name);
+                printProgressBar(j + nnnz + nrow, nnnz + 2 * nrow);
             }
             c = strtod(linestr, &end);
             linestr = end + 1;
@@ -314,13 +314,11 @@ solveMeta *read_new(int mid, string task_name, string matrix_file, string rhs_fi
     }
     // 释放内存
     free(buffer);
-    printProgressBar(nrow + nnnz + nrow, nnnz + 2 * nrow, task_name);
+    printProgressBar(nrow + nnnz + nrow, nnnz + 2 * nrow);
     printf("\n");
     printTime();
-    printf("---[%s]数据读取完成 \n", task_name.c_str());
+    printf("---数据读取完成 \n");
     solveMeta *meta = new solveMeta;
-    meta->mid = mid;
-    meta->task_name = task_name;
     meta->result_file = result_file;
     meta->rowPtr = rowPtr;
     meta->colInd = colInd;
